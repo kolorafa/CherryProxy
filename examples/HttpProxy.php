@@ -24,6 +24,7 @@ class OutConnection extends StreamServerNode {
         $this->client = $client;
         $this->request = $request;
         $logger->debug("Opening new OUT connection to ".$socketAddress);
+        $logger->debug("With data: ".$data);
         //$opts = stream_context_create(array('socket' =>array('bindto' => $this->binduj.':0')));
         $this->socket = stream_socket_client($socketAddress, $errno, $errstr, 60, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT/* ,$opts */);
         parent::__construct($this->socket, "", $logger);
@@ -52,12 +53,31 @@ class HttpProxy implements HttpRequestHandlerInterface {
     public function onRequest(StreamServerNodeInterface $client, HttpRequest $request) {
         $headers = $request->getHeaders();
         $host = $request->getHeader("Host");
-        $host = "dlk.pl:80"; //testing purpose
+        $uri = $request->getUri();
+        
+        if(strpos($uri,"https://") === 0){
+            /* ssl not supported */
+            $client->disconnect();
+            return;
+        }
+        
+        if(strpos($uri,"http://") === 0){
+            /* ssl not supported */
+            $pos1 = strpos($uri,"/",7);
+            $host = substr($uri,7,$pos1-7);
+            $uri = substr($uri,$pos1);
+        }
+        
+        if(strpos($host,":")===false){
+            $host .= ":80";
+        }
+        
+        //$host = "dlk.pl:80"; //testing purpose
 
         $headres["connection"][1] = "close"; //supports only single connection mode to backend
 
         $socketAddress = "tcp://" . $host;
-        $data = $request->getMethod() . " " . $request->getUri() . " HTTP/" . $request->getProtocolVersion() . "\r\n";
+        $data = $request->getMethod() . " " . $uri . " HTTP/" . $request->getProtocolVersion() . "\r\n";
         $data .= "Host: " . $host . "\r\n";
         foreach ($headers as $key => $header) {
             if (strtolower($key) == "host") {
