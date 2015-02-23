@@ -19,19 +19,23 @@ class OutConnection extends StreamServerNode {
     private $client;
     private $request;
 
-    public function __construct($socketAddress, $data, $logger, StreamServerNodeInterface $client, HttpRequest $request) {
+    public function __construct($socketAddress, $data, $logger, StreamServerNodeInterface $client, $streamOpts) {
         $this->outputBuffer = $data;
         $this->client = $client;
-        $this->request = $request;
-        $logger->debug("Opening new OUT connection to ".$socketAddress);
-        $logger->debug("With data: ".$data);
+        $logger->debug("Opening new OUT connection to " . $socketAddress);
+        $logger->debug("With data: " . $data);
         //$opts = stream_context_create(array('socket' =>array('bindto' => $this->binduj.':0')));
-        $this->socket = stream_socket_client($socketAddress, $errno, $errstr, 60, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT/* ,$opts */);
+        if ($streamOpts === null) {
+            $this->socket = stream_socket_client($socketAddress, $errno, $errstr, 60, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT);
+        } else {
+            $opts = stream_context_create($streamOpts);
+            $this->socket = stream_socket_client($socketAddress, $errno, $errstr, 60, STREAM_CLIENT_CONNECT | STREAM_CLIENT_ASYNC_CONNECT, $opts);
+        }
         parent::__construct($this->socket, "", $logger);
     }
 
     protected function processInputBuffer() {
-        
+
         $this->client->pushData($this->inputBuffer);
         $this->inputBuffer = "";
     }
@@ -40,6 +44,7 @@ class OutConnection extends StreamServerNode {
         $this->client->disconnect();
         parent::disconnect(true);
     }
+
 }
 
 class HttpProxy implements HttpRequestHandlerInterface {
@@ -51,32 +56,63 @@ class HttpProxy implements HttpRequestHandlerInterface {
     }
 
     public function onRequest(StreamServerNodeInterface $client, HttpRequest $request) {
+        var_dump($request);
         $headers = $request->getHeaders();
         $host = $request->getHeader("Host");
         $uri = $request->getUri();
-        
-        if(strpos($uri,"https://") === 0){
+        $opts = null;
+        $prot = "tcp";
+        if (strpos($uri, "https://") === 0) {
             /* ssl not supported */
+            $prot = "tls";
+            $opts = array(
+                "ssl" => array(
+                    "allow_self_signed" => true,
+                    "verify_peer" => false,
+                    'ciphers'=>'RC4-SHA'
+                ),
+            );
+            $pos1 = strpos($uri, "/", 8);
+            $host = substr($uri, 8, $pos1 - 8);
+            $uri = substr($uri, $pos1);
+            
+            /*
+             * work in progress, so disconnect
+             */
             $client->disconnect();
             return;
         }
-        
-        if(strpos($uri,"http://") === 0){
-            /* ssl not supported */
-            $pos1 = strpos($uri,"/",7);
-            $host = substr($uri,7,$pos1-7);
-            $uri = substr($uri,$pos1);
+
+        if (strpos($uri, "http://") === 0) {
+//            $prot = "tls";
+//            $opts = array(
+//                "ssl" => array(
+//                    "allow_self_signed" => true,
+//                    "verify_peer" => false,
+//                    "ciphers"=>'SEED-SHA'
+//                ),
+//                "tls" => array(
+//                    "allow_self_signed" => true,
+//                    "verify_peer" => false,
+//                    "ciphers"=>'SEED-SHA'
+//                ),
+//            );
+            $pos1 = strpos($uri, "/", 7);
+            $host = substr($uri, 7, $pos1 - 7);
+            $uri = substr($uri, $pos1);
         }
-        
-        if(strpos($host,":")===false){
-            $host .= ":80";
+
+        if (strpos($host, ":") === false) {
+            //$host .= ":80";
+            $socketAddress = $prot . "://" . $host . ":80";
+        } else {
+            $socketAddress = $prot . "://" . $host;
         }
-        
+
         //$host = "dlk.pl:80"; //testing purpose
 
         $headres["connection"][1] = "close"; //supports only single connection mode to backend
 
-        $socketAddress = "tcp://" . $host;
         $data = $request->getMethod() . " " . $uri . " HTTP/" . $request->getProtocolVersion() . "\r\n";
         $data .= "Host: " . $host . "\r\n";
         foreach ($headers as $key => $header) {
@@ -90,8 +126,8 @@ class HttpProxy implements HttpRequestHandlerInterface {
             $data .= $key . ": " . $header . "\r\n";
         }
         $data .= "\r\n";
-        
-        $outConnection = new OutConnection($socketAddress, $data, $this->logger, $client, $request);
+
+        $outConnection = new OutConnection($socketAddress, $data, $this->logger, $client, $opts);
         $this->multiplexer->addNode($outConnection);
     }
 
@@ -100,6 +136,7 @@ class HttpProxy implements HttpRequestHandlerInterface {
     }
 
     /* Server */
+
     var $multiplexer;
 
 }
