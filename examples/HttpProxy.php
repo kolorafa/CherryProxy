@@ -19,7 +19,7 @@ class OutConnection extends StreamServerNode {
     private $client;
     private $request;
 
-    public function __construct($socketAddress, $data, $logger, StreamServerNodeInterface $client, $streamOpts) {
+    public function __construct($socketAddress, $data, $logger, StreamServerNodeInterface $client, $streamOpts = null) {
         $this->outputBuffer = $data;
         $this->client = $client;
         $logger->debug("Opening new OUT connection to " . $socketAddress);
